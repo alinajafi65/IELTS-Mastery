@@ -67,6 +67,19 @@ export class GeminiService {
     return JSON.parse(response.text);
   }
 
+  async generateScaffoldHint(skill: string, context: string, targetBand: number): Promise<string> {
+    const response = await this.ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: `Context: ${context}. Skill: ${skill}. Target Band: ${targetBand}. 
+      Provide a short (1-2 sentences) linguistic scaffolding hint. 
+      Do NOT give the answer. Instead, suggest a grammatical structure, a synonym, or a cohesive device the student could use.`,
+      config: {
+        temperature: 0.7,
+      }
+    });
+    return response.text || "Try to use more complex sentence structures to show range.";
+  }
+
   async generatePlacementTest(): Promise<Question[]> {
     const response = await this.ai.models.generateContent({
       model: "gemini-3-flash-preview",
@@ -111,10 +124,7 @@ export class GeminiService {
   }
 
   async getChatResponse(history: {role: string, text: string}[], message: string, systemContext: string, audioData?: string) {
-    // Strictly alternate roles: User -> Model -> User
     const contents: any[] = [];
-    
-    // Process history ensuring alternating roles
     history.forEach((msg) => {
       contents.push({
         role: msg.role === 'model' ? 'model' : 'user',
@@ -122,7 +132,6 @@ export class GeminiService {
       });
     });
 
-    // Add current message
     const currentParts: any[] = [{ text: message }];
     if (audioData) {
       currentParts.push({
@@ -138,7 +147,6 @@ export class GeminiService {
       parts: currentParts
     });
 
-    // Gemini 3 Flash prefers system instructions in the config
     const response = await this.ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents,

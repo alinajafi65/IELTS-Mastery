@@ -16,6 +16,14 @@ export interface Activity {
   score?: number;
 }
 
+export interface VocabularyItem {
+  word: string;
+  skill: IELTSSkill;
+  dateAdded: string;
+  mastered: boolean;
+  context?: string;
+}
+
 export interface SkillProgress {
   skill: IELTSSkill;
   sessionsCompleted: number;
@@ -33,6 +41,7 @@ export interface UserProfile {
   completedOnboarding: boolean;
   progress: SkillProgress[];
   activityLog: Activity[];
+  vocabVault: VocabularyItem[]; // New field for centralized vocab management
 }
 
 export interface PracticeModule {
@@ -48,7 +57,6 @@ export interface QuizQuestion {
   correctAnswer: string;
 }
 
-// Added Question interface for Placement Tests
 export interface Question {
   id: string;
   text: string;

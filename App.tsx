@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
-import { UserProfile, IELTSSkill, PracticeModule } from './types';
+import { UserProfile, IELTSSkill, PracticeModule, VocabularyItem } from './types';
 import Onboarding from './components/Onboarding';
 import Dashboard from './components/Dashboard';
 import PlacementTest from './components/PlacementTest';
@@ -7,13 +8,17 @@ import Sidebar from './components/Sidebar';
 import SkillSelection from './components/SkillSelection';
 import SkillModules from './components/SkillModules';
 import AITutor from './components/AITutor';
+import VocabularyVault from './components/VocabularyVault';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<UserProfile | null>(() => {
-    const saved = localStorage.getItem('ielts_mastery_v3');
+    const saved = localStorage.getItem('ielts_mastery_v4');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        // Migrating old data to v4 with vocabVault
+        if (!parsed.vocabVault) parsed.vocabVault = [];
+        return parsed;
       } catch (e) {
         return null;
       }
@@ -21,22 +26,33 @@ const App: React.FC = () => {
     return null;
   });
 
-  const [view, setView] = useState<'dash' | 'test' | 'skills' | 'modules' | 'tutor'>('dash');
+  const [view, setView] = useState<'dash' | 'test' | 'skills' | 'modules' | 'tutor' | 'vault'>('dash');
   const [selectedSkill, setSelectedSkill] = useState<IELTSSkill>('reading');
   const [selectedModule, setSelectedModule] = useState<PracticeModule | null>(null);
 
   useEffect(() => {
     if (user) {
-      localStorage.setItem('ielts_mastery_v3', JSON.stringify(user));
+      localStorage.setItem('ielts_mastery_v4', JSON.stringify(user));
     }
   }, [user]);
 
   const handleSessionComplete = useCallback((data: { feedback: string; vocab: string[]; grammar: string[] }) => {
     setUser(prev => {
       if (!prev || !selectedModule) return prev;
-      const newProgress = [...prev.progress];
-      const skillIdx = newProgress.findIndex(p => p.skill === selectedSkill);
-      const updatedProgress = [...newProgress];
+      
+      const newVocabItems: VocabularyItem[] = data.vocab.map(word => ({
+        word,
+        skill: selectedSkill,
+        dateAdded: new Date().toISOString(),
+        mastered: false
+      }));
+
+      // Merge only unique words into the vault
+      const existingWords = new Set(prev.vocabVault.map(v => v.word.toLowerCase()));
+      const filteredNewVocab = newVocabItems.filter(v => !existingWords.has(v.word.toLowerCase()));
+
+      const skillIdx = prev.progress.findIndex(p => p.skill === selectedSkill);
+      const updatedProgress = [...prev.progress];
       
       if (skillIdx > -1) {
         updatedProgress[skillIdx] = {
@@ -65,27 +81,42 @@ const App: React.FC = () => {
       return {
         ...prev,
         progress: updatedProgress,
-        activityLog: [...(prev.activityLog || []), newActivity]
+        vocabVault: [...prev.vocabVault, ...filteredNewVocab],
+        activityLog: [...prev.activityLog, newActivity]
       };
     });
     setView('dash');
   }, [selectedModule, selectedSkill]);
 
-  const handleChangeType = useCallback(() => {
-    // Removed window.confirm to fix simulator issues
-    if (!user) return;
-    const nextType = user.type === 'academic' ? 'general' : 'academic';
-    setUser(prev => prev ? ({ ...prev, type: nextType }) : null);
-  }, [user]);
+  const toggleVocabMastery = (word: string) => {
+    setUser(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        vocabVault: prev.vocabVault.map(v => v.word === word ? { ...v, mastered: !v.mastered } : v)
+      };
+    });
+  };
 
-  const handleLogout = useCallback(() => {
-    // Removed window.confirm to fix simulator issues
-    localStorage.removeItem('ielts_mastery_v3');
-    setUser(null);
-    setView('dash');
+  const handleChangeType = useCallback(() => {
+    setUser(prev => {
+      if (!prev) return null;
+      return { ...prev, type: prev.type === 'academic' ? 'general' : 'academic' };
+    });
   }, []);
 
-  if (!user) return <Onboarding onComplete={(p, start) => { setUser(p); setView(start ? 'test' : 'dash'); }} />;
+  const handleLogout = useCallback(() => {
+    if (window.confirm("Sign out and reset all progress?")) {
+      localStorage.removeItem('ielts_mastery_v4');
+      setUser(null);
+      setView('dash');
+    }
+  }, []);
+
+  if (!user) return <Onboarding onComplete={(p, start) => { 
+    setUser({ ...p, vocabVault: [] }); 
+    setView(start ? 'test' : 'dash'); 
+  }} />;
 
   return (
     <div className="flex h-screen bg-slate-50 text-slate-900 overflow-hidden font-['Inter']">
@@ -106,6 +137,13 @@ const App: React.FC = () => {
               onLogout={handleLogout}
             />
           )}
+          {view === 'vault' && (
+            <VocabularyVault 
+              user={user} 
+              onToggleMastery={toggleVocabMastery} 
+              onBack={() => setView('dash')}
+            />
+          )}
           {view === 'test' && (
             <PlacementTest onComplete={res => { 
               setUser(prev => prev ? ({ ...prev, currentLevel: res.level, estimatedBand: res.band, completedOnboarding: true }) : null); 
@@ -113,27 +151,13 @@ const App: React.FC = () => {
             }} />
           )}
           {view === 'skills' && (
-            <SkillSelection 
-              onSelect={s => { setSelectedSkill(s); setView('modules'); }} 
-              onBack={() => setView('dash')} 
-            />
+            <SkillSelection onSelect={s => { setSelectedSkill(s); setView('modules'); }} onBack={() => setView('dash')} />
           )}
           {view === 'modules' && (
-            <SkillModules 
-              user={user} 
-              skill={selectedSkill} 
-              onSelectModule={m => { setSelectedModule(m); setView('tutor'); }} 
-              onBack={() => setView('skills')} 
-            />
+            <SkillModules user={user} skill={selectedSkill} onSelectModule={m => { setSelectedModule(m); setView('tutor'); }} onBack={() => setView('skills')} />
           )}
           {view === 'tutor' && selectedModule && (
-            <AITutor 
-              user={user} 
-              skill={selectedSkill} 
-              module={selectedModule} 
-              onBack={() => setView('modules')}
-              onComplete={handleSessionComplete}
-            />
+            <AITutor user={user} skill={selectedSkill} module={selectedModule} onBack={() => setView('modules')} onComplete={handleSessionComplete} />
           )}
         </div>
       </main>

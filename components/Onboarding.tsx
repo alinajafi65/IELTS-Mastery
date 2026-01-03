@@ -13,6 +13,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
   const [currentBand, setCurrentBand] = useState(5.5);
 
   const handleSubmit = (startTest: boolean) => {
+    // FIX: Included missing vocabVault property to match UserProfile interface definition
     onComplete({
       name,
       type,
@@ -21,7 +22,8 @@ const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
       estimatedBand: startTest ? null : currentBand,
       completedOnboarding: !startTest,
       progress: [],
-      activityLog: []
+      activityLog: [],
+      vocabVault: []
     }, startTest);
   };
 
