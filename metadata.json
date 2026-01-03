@@ -1,0 +1,7 @@
+{
+  "name": "Copy of IELTS Mastery ",
+  "description": "A comprehensive AI-powered IELTS preparation platform that assesses proficiency, provides personalized study materials, and offers real-time tutoring using Gemini.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
