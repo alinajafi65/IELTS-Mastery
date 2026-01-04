@@ -2,13 +2,14 @@ import { Question } from "../types";
 
 export class GeminiService {
   private apiKey: string;
-  // List of models to try in order. If one fails, we try the next.
+  
+  // UPDATED LIST: Added 'gemini-pro' (older but very stable) 
+  // and kept 2.0 as the backup.
   private models = [
     "gemini-1.5-flash",
-    "gemini-1.5-flash-001",
-    "gemini-1.5-flash-002",
-    "gemini-1.5-flash-8b",
-    "gemini-2.0-flash-exp" 
+    "gemini-1.5-pro",
+    "gemini-1.0-pro",    // <--- NEW: Very reliable older model
+    "gemini-2.0-flash-exp"
   ];
 
   constructor() {
@@ -18,7 +19,12 @@ export class GeminiService {
     }
   }
 
-  // --- THE MACHINE GUN FETCHER ---
+  // Helper function to pause execution (Wait for X milliseconds)
+  private wait(ms: number) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  // --- THE SMART FETCHER (With Retry) ---
   private async callGemini(prompt: string, schema?: any) {
     if (!this.apiKey) return null;
 
@@ -33,52 +39,61 @@ export class GeminiService {
       };
     }
 
-    // Try each model in the list until one works
+    // Try each model in the list
     for (const model of this.models) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
-        
-        const response = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body)
-        });
+      // If we hit a rate limit (429), we will retry THIS specific model up to 3 times
+      let attempts = 0;
+      const maxAttempts = 3;
 
-        // If it's a 404 (Not Found) or 503 (Overloaded), loop to the next model
-        if (response.status === 404 || response.status === 503) {
-          console.warn(`Model ${model} failed (${response.status}). Trying next...`);
-          continue; 
+      while (attempts < maxAttempts) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
+          
+          const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+          });
+
+          // 404 = Model doesn't exist for you. Stop retrying this model, move to next.
+          if (response.status === 404) {
+            console.warn(`Model ${model} not found (404). Skipping.`);
+            break; // Break the 'while' loop, go to next model in 'for' loop
+          }
+
+          // 429 = Too Fast! WAIT and RETRY.
+          if (response.status === 429 || response.status === 503) {
+            attempts++;
+            console.warn(`Model ${model} is busy (429). Waiting 4 seconds... (Attempt ${attempts}/${maxAttempts})`);
+            await this.wait(4000); // Wait 4 seconds
+            continue; // Try again
+          }
+
+          // Any other error? Move to next model.
+          if (!response.ok) {
+             console.warn(`Model ${model} error: ${response.statusText}`);
+             break;
+          }
+
+          // SUCCESS!
+          const data = await response.json();
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          return text ? text.replace(/```json/g, '').replace(/```/g, '').trim() : null;
+
+        } catch (e) {
+          console.error(`Model ${model} crashed.`, e);
+          break;
         }
-
-        // If it's a real error (like 429 quota), we might still want to try next, 
-        // but usually 429 means "stop". However, let's keep trying to be safe.
-        if (!response.ok) {
-           console.warn(`Model ${model} error: ${response.statusText}`);
-           continue;
-        }
-
-        // IF WE GET HERE, IT WORKED!
-        const data = await response.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        return text ? text.replace(/```json/g, '').replace(/```/g, '').trim() : null;
-
-      } catch (e) {
-        console.error(`Model ${model} crashed.`, e);
       }
     }
     
-    console.error("ALL MODELS FAILED. Check API Key or Google Service Status.");
+    console.error("ALL MODELS FAILED. Using Fallback Mock Data.");
     return null;
   }
 
-  // --- AUDIO (Disabled to prevent crashes) ---
-  async generateListeningAudio(script: string) {
-    return null; 
-  }
-
-  async generateWritingTaskImage(type: string, band: number) {
-    return null;
-  }
+  // --- AUDIO (Disabled) ---
+  async generateListeningAudio(script: string) { return null; }
+  async generateWritingTaskImage(type: string, band: number) { return null; }
 
   // --- MAIN FUNCTIONS ---
 
@@ -99,15 +114,18 @@ export class GeminiService {
     };
     
     const text = await this.callGemini(prompt, schema);
-    if (!text) return [];
+    // If AI fails completely, return Safe Mock Data so the app doesn't go blank
+    if (!text) return [
+      { id: "mock1", title: "Practice Set 1", description: "Standard practice (AI Busy)", type: "Standard" },
+      { id: "mock2", title: "Practice Set 2", description: "Standard practice (AI Busy)", type: "Standard" }
+    ];
     try { return JSON.parse(text); } catch { return []; }
   }
 
   async generateScaffoldHint(skill: string, context: string, targetBand: number): Promise<string> {
-    const prompt = `Context: ${context}. Skill: ${skill}. Target Band: ${targetBand}. 
-    Provide a short (1-2 sentences) linguistic scaffolding hint.`;
+    const prompt = `Context: ${context}. Skill: ${skill}. Target Band: ${targetBand}. Provide a short hint.`;
     const text = await this.callGemini(prompt);
-    return text || "Try to use more complex sentence structures.";
+    return text || "Focus on your vocabulary range.";
   }
 
   async generatePlacementTest(): Promise<Question[]> {
@@ -150,7 +168,7 @@ export class GeminiService {
     history.forEach(h => fullPrompt += `${h.role}: ${h.text}\n`);
     fullPrompt += `User: ${message}`;
     const text = await this.callGemini(fullPrompt);
-    return text || "Connection issue. Please try again.";
+    return text || "I am thinking... please try again.";
   }
 
   async generateEndSessionQuiz(topic: string, level: number) {
