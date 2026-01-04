@@ -1,80 +1,89 @@
 import { Question } from "../types";
 
-// We don't need the library anymore for the main logic!
-const API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
-
 export class GeminiService {
   private apiKey: string;
+  // List of models to try in order. If one fails, we try the next.
+  private models = [
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-001",
+    "gemini-1.5-flash-002",
+    "gemini-1.5-flash-8b",
+    "gemini-2.0-flash-exp" 
+  ];
 
   constructor() {
     this.apiKey = import.meta.env.VITE_API_KEY || "";
     if (!this.apiKey) {
-      console.error("API Key is missing! Check Netlify Environment Variables.");
+      console.error("API Key is missing! Check Cloudflare Environment Variables.");
     }
   }
 
-  // --- NEW: DIRECT API CALLER (Bypasses Library Errors) ---
+  // --- THE MACHINE GUN FETCHER ---
   private async callGemini(prompt: string, schema?: any) {
     if (!this.apiKey) return null;
 
-    try {
-      const body: any = {
-        contents: [{ parts: [{ text: prompt }] }]
+    const body: any = {
+      contents: [{ parts: [{ text: prompt }] }]
+    };
+
+    if (schema) {
+      body.generationConfig = {
+        response_mime_type: "application/json",
+        response_schema: schema
       };
-
-      // Add schema if requested (JSON mode)
-      if (schema) {
-        body.generationConfig = {
-          response_mime_type: "application/json",
-          response_schema: schema
-        };
-      }
-
-      const response = await fetch(`${API_URL}?key=${this.apiKey}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
-      });
-
-      if (!response.ok) {
-        const err = await response.text();
-        console.error("Gemini API Error:", err);
-        throw new Error(`API Error: ${response.status}`);
-      }
-
-      const data = await response.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      
-      // Clean up markdown just in case
-      return text ? text.replace(/```json/g, '').replace(/```/g, '').trim() : null;
-
-    } catch (e) {
-      console.error("Direct API Call Failed:", e);
-      return null;
     }
+
+    // Try each model in the list until one works
+    for (const model of this.models) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
+        
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+
+        // If it's a 404 (Not Found) or 503 (Overloaded), loop to the next model
+        if (response.status === 404 || response.status === 503) {
+          console.warn(`Model ${model} failed (${response.status}). Trying next...`);
+          continue; 
+        }
+
+        // If it's a real error (like 429 quota), we might still want to try next, 
+        // but usually 429 means "stop". However, let's keep trying to be safe.
+        if (!response.ok) {
+           console.warn(`Model ${model} error: ${response.statusText}`);
+           continue;
+        }
+
+        // IF WE GET HERE, IT WORKED!
+        const data = await response.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        return text ? text.replace(/```json/g, '').replace(/```/g, '').trim() : null;
+
+      } catch (e) {
+        console.error(`Model ${model} crashed.`, e);
+      }
+    }
+    
+    console.error("ALL MODELS FAILED. Check API Key or Google Service Status.");
+    return null;
   }
 
-  // --- AUDIO (We still use the library URL logic manually here for TTS if needed, 
-  // but for now let's keep it simple or return null to prevent crashes) ---
+  // --- AUDIO (Disabled to prevent crashes) ---
   async generateListeningAudio(script: string) {
-    // Audio is complex via REST. For now, let's skip it to get the app working,
-    // or you can try to re-enable the library just for this later.
-    // Returning null means it will just skip the audio, not crash.
-    console.warn("Audio temporarily disabled to ensure stability.");
     return null; 
   }
 
   async generateWritingTaskImage(type: string, band: number) {
-    // Image generation via REST is also complex. Disabling to prevent 404s.
     return null;
   }
 
-  // --- MAIN FUNCTIONS (Now using Direct Fetch) ---
+  // --- MAIN FUNCTIONS ---
 
   async getPracticeModules(skill: string, band: number, type: string) {
     const prompt = `Generate 4 specific IELTS practice modules for ${skill} (${type} track) at Band ${band} level. Provide in JSON.`;
-    
-    // We construct the schema manually for REST
     const schema = {
       type: "ARRAY",
       items: {
@@ -88,7 +97,7 @@ export class GeminiService {
         required: ["id", "title", "description", "type"]
       }
     };
-
+    
     const text = await this.callGemini(prompt, schema);
     if (!text) return [];
     try { return JSON.parse(text); } catch { return []; }
@@ -96,9 +105,7 @@ export class GeminiService {
 
   async generateScaffoldHint(skill: string, context: string, targetBand: number): Promise<string> {
     const prompt = `Context: ${context}. Skill: ${skill}. Target Band: ${targetBand}. 
-    Provide a short (1-2 sentences) linguistic scaffolding hint. 
-    Do NOT give the answer. Instead, suggest a grammatical structure, a synonym, or a cohesive device.`;
-    
+    Provide a short (1-2 sentences) linguistic scaffolding hint.`;
     const text = await this.callGemini(prompt);
     return text || "Try to use more complex sentence structures.";
   }
@@ -118,7 +125,6 @@ export class GeminiService {
         required: ["id", "text", "options", "correctAnswer"]
       }
     };
-
     const text = await this.callGemini(prompt, schema);
     if (!text) return [];
     try { return JSON.parse(text); } catch { return []; }
@@ -134,20 +140,17 @@ export class GeminiService {
       },
       required: ["level", "band"]
     };
-
     const text = await this.callGemini(prompt, schema);
     if (!text) return { level: "Intermediate", band: 5.5 };
     try { return JSON.parse(text); } catch { return { level: "Intermediate", band: 5.5 }; }
   }
 
   async getChatResponse(history: {role: string, text: string}[], message: string, systemContext: string) {
-    // Construct history for REST
     let fullPrompt = `System: ${systemContext}\n\n`;
     history.forEach(h => fullPrompt += `${h.role}: ${h.text}\n`);
     fullPrompt += `User: ${message}`;
-
     const text = await this.callGemini(fullPrompt);
-    return text || "I am having trouble connecting.";
+    return text || "Connection issue. Please try again.";
   }
 
   async generateEndSessionQuiz(topic: string, level: number) {
@@ -163,7 +166,6 @@ export class GeminiService {
         }
       }
     };
-
     const text = await this.callGemini(prompt, schema);
     if (!text) return [];
     try { return JSON.parse(text); } catch { return []; }
@@ -172,7 +174,6 @@ export class GeminiService {
 
 export const gemini = new GeminiService();
 
-// Keep this helper for legacy support, even if unused
 export async function decodeAudio(base64: string, ctx: AudioContext): Promise<AudioBuffer> {
   const binaryString = atob(base64);
   const bytes = new Uint8Array(binaryString.length);
