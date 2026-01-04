@@ -12,8 +12,32 @@ export class GeminiService {
     this.ai = new GoogleGenAI({ apiKey: apiKey || "MISSING_KEY" });
   }
 
+  // --- HELPER: Tries Standard Model first, falls back to Experimental if needed ---
+  private async generateWithFallback(options: any) {
+    try {
+      // 1. Try the Stable, Fast Model first
+      // We use 'gemini-1.5-flash-001' which is the specific stable version
+      return await this.ai.models.generateContent({
+        ...options,
+        model: "gemini-1.5-flash-001", 
+      });
+    } catch (e: any) {
+      // 2. If that fails (404 Not Found), switch to the Experimental model
+      // We know this works because you used it before!
+      if (e.message?.includes("404") || e.status === 404) {
+        console.warn("Standard model not found, switching to Experimental...");
+        return await this.ai.models.generateContent({
+          ...options,
+          model: "gemini-2.0-flash-exp", 
+        });
+      }
+      throw e; // If it's another error, crash normally
+    }
+  }
+
   async generateListeningAudio(script: string) {
     try {
+      // Audio always works best on 2.0
       const response = await this.ai.models.generateContent({
         model: "gemini-2.0-flash-exp", 
         contents: [{ parts: [{ text: `Read this IELTS passage clearly and naturally: ${script}` }] }],
@@ -51,8 +75,8 @@ export class GeminiService {
 
   async getPracticeModules(skill: string, band: number, type: string) {
     try {
-      const response = await this.ai.models.generateContent({
-        model: "gemini-1.5-flash-002", 
+      // USE FALLBACK LOGIC HERE
+      const response = await this.generateWithFallback({
         contents: `Generate 4 specific IELTS practice modules for ${skill} (${type} track) at Band ${band} level. Provide in JSON.`,
         config: {
           responseMimeType: "application/json",
@@ -83,8 +107,7 @@ export class GeminiService {
 
   async generateScaffoldHint(skill: string, context: string, targetBand: number): Promise<string> {
     try {
-      const response = await this.ai.models.generateContent({
-        model: "gemini-1.5-flash-002", 
+      const response = await this.generateWithFallback({
         contents: `Context: ${context}. Skill: ${skill}. Target Band: ${targetBand}. 
         Provide a short (1-2 sentences) linguistic scaffolding hint. 
         Do NOT give the answer. Instead, suggest a grammatical structure, a synonym, or a cohesive device.`,
@@ -98,8 +121,7 @@ export class GeminiService {
 
   async generatePlacementTest(): Promise<Question[]> {
     try {
-      const response = await this.ai.models.generateContent({
-        model: "gemini-1.5-flash-002", 
+      const response = await this.generateWithFallback({
         contents: "Generate 10 multiple-choice IELTS placement test questions (JSON).",
         config: {
           responseMimeType: "application/json",
@@ -128,8 +150,7 @@ export class GeminiService {
 
   async getLevelAssessment(score: number, total: number): Promise<{ level: string; band: number }> {
     try {
-      const response = await this.ai.models.generateContent({
-        model: "gemini-1.5-flash-002", 
+      const response = await this.generateWithFallback({
         contents: `Score is ${score}/${total}. Assess IELTS band and level (JSON).`,
         config: {
           responseMimeType: "application/json",
@@ -171,8 +192,7 @@ export class GeminiService {
 
       contents.push({ role: 'user', parts: currentParts });
 
-      const response = await this.ai.models.generateContent({
-        model: "gemini-1.5-flash-002", 
+      const response = await this.generateWithFallback({
         contents,
         config: { systemInstruction: systemContext }
       });
@@ -184,8 +204,7 @@ export class GeminiService {
 
   async generateEndSessionQuiz(topic: string, level: number) {
     try {
-      const response = await this.ai.models.generateContent({
-        model: "gemini-1.5-flash-002", 
+      const response = await this.generateWithFallback({
         contents: `3-question quiz for ${topic} at Band ${level} (JSON).`,
         config: {
           responseMimeType: "application/json",
