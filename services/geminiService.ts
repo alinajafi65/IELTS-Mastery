@@ -131,4 +131,30 @@ export class GeminiService {
     if (text) try { return JSON.parse(text); } catch {}
     return [
       { id: "q1", text: "She ___ to the market yesterday.", options: ["go", "went", "gone", "going"], correctAnswer: "went" },
-      { id: "q2", text: "I look forward ___ from you.", options: ["hear", "to hear", "to hearing", "hea
+      { id: "q2", text: "I look forward ___ from you.", options: ["hear", "to hear", "to hearing", "heard"], correctAnswer: "to hearing" },
+      { id: "q3", text: "The data ___ a sharp decrease.", options: ["illustrates", "illustrate", "illustrating", "illustration"], correctAnswer: "illustrates" },
+      { id: "q4", text: "Despite ___ tired, he finished the work.", options: ["he was", "of being", "being", "be"], correctAnswer: "being" },
+      { id: "q5", text: "If I were you, I ___ accept the offer.", options: ["will", "would", "can", "shall"], correctAnswer: "would" }
+    ];
+  }
+
+  async getLevelAssessment(score: number, total: number): Promise<{ level: string; band: number }> {
+    return { level: "Intermediate", band: 6.0 + (score / total) * 3 };
+  }
+  
+  async generateEndSessionQuiz(topic: string, level: number) { return []; }
+  async generateListeningAudio(script: string) { return null; }
+  async generateWritingTaskImage(type: string, band: number) { return null; }
+}
+
+export const gemini = new GeminiService();
+export async function decodeAudio(base64: string, ctx: AudioContext): Promise<AudioBuffer> {
+  const binaryString = atob(base64);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+  const dataInt16 = new Int16Array(bytes.buffer);
+  const buffer = ctx.createBuffer(1, dataInt16.length, 24000);
+  const channelData = buffer.getChannelData(0);
+  for (let i = 0; i < dataInt16.length; i++) channelData[i] = dataInt16[i] / 32768.0;
+  return buffer;
+}
