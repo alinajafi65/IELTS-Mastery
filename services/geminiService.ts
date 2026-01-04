@@ -2,11 +2,13 @@ import { Question } from "../types";
 
 export class GeminiService {
   private apiKey: string;
+  // VPN OPTIMIZED LIST: Standard models first!
   private models = [
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-001",
-    "gemini-1.5-pro",
-    "gemini-2.0-flash-exp"
+    "gemini-1.5-flash",       // Fast, Standard (Best for US IP)
+    "gemini-1.5-flash-001",   // Specific version
+    "gemini-1.5-pro",         // Smarter, slightly slower
+    "gemini-1.0-pro",         // Older, very reliable
+    "gemini-2.0-flash-exp"    // Experimental (Backup)
   ];
 
   constructor() {
@@ -27,7 +29,6 @@ export class GeminiService {
     }
 
     for (const model of this.models) {
-      // Try only once per model to speed things up
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
         const response = await fetch(url, {
@@ -36,19 +37,31 @@ export class GeminiService {
           body: JSON.stringify(body)
         });
 
-        if (response.status === 404) continue; 
-        if (response.status === 429) { await this.wait(1000); continue; }
+        // 404 = Blocked in region. 429 = Too fast.
+        if (response.status === 404) {
+          console.warn(`Model ${model} not available in this region (VPN might fix this).`);
+          continue; 
+        }
+        if (response.status === 429) { 
+          await this.wait(1000); 
+          continue; 
+        }
+        
         if (!response.ok) continue;
 
         const data = await response.json();
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        
+        // !!! SUCCESS INDICATOR !!!
+        console.log(`%c SUCCESS! Connected to Real AI using ${model}`, "color: lime; font-size: 14px;");
+        
         return text ? text.replace(/```json/g, '').replace(/```/g, '').trim() : null;
       } catch (e) { continue; }
     }
-    return null; // Signals failure -> Switch to Simulation Mode
+    return null; // All failed -> Fallback
   }
 
-  // --- SMART SIMULATION ENGINE (The Fix) ---
+  // --- SMART SIMULATION (Only runs if VPN/AI fails) ---
 
   async getPracticeModules(skill: string, band: number, type: string) {
     const prompt = `Generate 4 specific IELTS practice modules for ${skill} (${type} track) at Band ${band} level. Provide in JSON.`;
@@ -59,9 +72,8 @@ export class GeminiService {
       try { return JSON.parse(text); } catch {}
     }
 
-    // 2. Fallback: SMART SIMULATION (Dynamic based on selection)
-    console.warn("AI Offline. Generating Smart Simulation for:", skill);
-    
+    // 2. Fallback: Simulation
+    console.warn("VPN/AI Failed. Using Static Data.");
     if (skill === 'reading') {
       return [
         { id: "read1", title: `The Future of ${type === 'academic' ? 'Astrophysics' : 'Remote Work'}`, description: "Matching Headings & True/False", type: `${type} Reading` },
@@ -86,12 +98,10 @@ export class GeminiService {
         { id: "write4", title: "Task 2: Education Funding", description: "Discussion Essay.", type: "Writing Task 2" }
       ];
     }
-    // Default / Speaking
     return [
       { id: "speak1", title: "Part 1: Home and Hometown", description: "General Introduction", type: "Speaking" },
       { id: "speak2", title: "Part 2: Describe a memorable trip", description: "Cue Card", type: "Speaking" },
-      { id: "speak3", title: "Part 3: Discussion on Tourism", description: "Two-way discussion", type: "Speaking" },
-      { id: "speak4", title: "Mock Test: Full Session", description: "Complete Speaking Test", type: "Speaking" }
+      { id: "speak3", title: "Part 3: Discussion on Tourism", description: "Two-way discussion", type: "Speaking" }
     ];
   }
 
@@ -100,18 +110,9 @@ export class GeminiService {
     const text = await this.callGemini(`System: ${systemContext} User: ${message}`);
     if (text) return text;
 
-    // 2. Fallback: SMART CHAT
-    // We check keywords to give a relevant answer
-    const msg = message.toLowerCase();
-    if (msg.includes("hello") || msg.includes("hi")) return "Hello! I am your AI IELTS Tutor. Ready to practice?";
-    if (msg.includes("correct") || msg.includes("check")) return "That is a good attempt. However, try to use more academic vocabulary. For example, instead of 'good', use 'beneficial'.";
-    if (msg.includes("example")) return "Sure! For instance, you could say: 'The data illustrates a significant upward trend.'";
-    if (msg.includes("band")) return "Based on your input, this looks like a Band 6.0 response. To reach Band 7, expand your complex sentences.";
-    
-    return "That is an interesting point. Can you elaborate further? In the IELTS exam, extending your answer improves your Coherence and Cohesion score.";
+    // 2. Fallback: Simulation Chat
+    return "I am unable to connect to the AI server (Check VPN). However, generally speaking, extending your answer improves your Coherence and Cohesion score.";
   }
-
-  // --- HELPERS (Keep these simple) ---
 
   private getModuleSchema() {
     return {
@@ -137,8 +138,6 @@ export class GeminiService {
   async generatePlacementTest(): Promise<Question[]> {
     const text = await this.callGemini("Generate 10 IELTS placement questions JSON.");
     if (text) try { return JSON.parse(text); } catch {}
-    
-    // Backup Test
     return [
       { id: "q1", text: "She ___ to the market yesterday.", options: ["go", "went", "gone", "going"], correctAnswer: "went" },
       { id: "q2", text: "I look forward ___ from you.", options: ["hear", "to hear", "to hearing", "heard"], correctAnswer: "to hearing" },
@@ -151,7 +150,7 @@ export class GeminiService {
   async getLevelAssessment(score: number, total: number): Promise<{ level: string; band: number }> {
     return { level: "Assessed (Simulation)", band: 6.0 + (score / total) * 3 };
   }
-
+  
   async generateEndSessionQuiz(topic: string, level: number) { return []; }
   async generateListeningAudio(script: string) { return null; }
   async generateWritingTaskImage(type: string, band: number) { return null; }
@@ -159,7 +158,6 @@ export class GeminiService {
 
 export const gemini = new GeminiService();
 export async function decodeAudio(base64: string, ctx: AudioContext): Promise<AudioBuffer> {
-  // Keeping the audio decoder helper just in case
   const binaryString = atob(base64);
   const bytes = new Uint8Array(binaryString.length);
   for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
