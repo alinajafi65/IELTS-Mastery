@@ -14,7 +14,6 @@ export class GeminiService {
 
   async generateListeningAudio(script: string) {
     try {
-      // Audio works best on 2.0, even if we hit limits sometimes
       const response = await this.ai.models.generateContent({
         model: "gemini-2.0-flash-exp", 
         contents: [{ parts: [{ text: `Read this IELTS passage clearly and naturally: ${script}` }] }],
@@ -50,11 +49,8 @@ export class GeminiService {
     }
   }
 
-  // --- UPDATED MODEL NAMES BELOW TO FIX 404 ERRORS ---
-
   async getPracticeModules(skill: string, band: number, type: string) {
     try {
-      // FIX: Changed 'gemini-1.5-flash' to 'gemini-1.5-flash-002' (Exact Version)
       const response = await this.ai.models.generateContent({
         model: "gemini-1.5-flash-002", 
         contents: `Generate 4 specific IELTS practice modules for ${skill} (${type} track) at Band ${band} level. Provide in JSON.`,
@@ -88,7 +84,7 @@ export class GeminiService {
   async generateScaffoldHint(skill: string, context: string, targetBand: number): Promise<string> {
     try {
       const response = await this.ai.models.generateContent({
-        model: "gemini-1.5-flash-002", // FIX: Exact Version
+        model: "gemini-1.5-flash-002", 
         contents: `Context: ${context}. Skill: ${skill}. Target Band: ${targetBand}. 
         Provide a short (1-2 sentences) linguistic scaffolding hint. 
         Do NOT give the answer. Instead, suggest a grammatical structure, a synonym, or a cohesive device.`,
@@ -103,7 +99,7 @@ export class GeminiService {
   async generatePlacementTest(): Promise<Question[]> {
     try {
       const response = await this.ai.models.generateContent({
-        model: "gemini-1.5-flash-002", // FIX: Exact Version
+        model: "gemini-1.5-flash-002", 
         contents: "Generate 10 multiple-choice IELTS placement test questions (JSON).",
         config: {
           responseMimeType: "application/json",
@@ -133,7 +129,7 @@ export class GeminiService {
   async getLevelAssessment(score: number, total: number): Promise<{ level: string; band: number }> {
     try {
       const response = await this.ai.models.generateContent({
-        model: "gemini-1.5-flash-002", // FIX: Exact Version
+        model: "gemini-1.5-flash-002", 
         contents: `Score is ${score}/${total}. Assess IELTS band and level (JSON).`,
         config: {
           responseMimeType: "application/json",
@@ -176,7 +172,7 @@ export class GeminiService {
       contents.push({ role: 'user', parts: currentParts });
 
       const response = await this.ai.models.generateContent({
-        model: "gemini-1.5-flash-002", // FIX: Exact Version
+        model: "gemini-1.5-flash-002", 
         contents,
         config: { systemInstruction: systemContext }
       });
@@ -189,7 +185,7 @@ export class GeminiService {
   async generateEndSessionQuiz(topic: string, level: number) {
     try {
       const response = await this.ai.models.generateContent({
-        model: "gemini-1.5-flash-002", // FIX: Exact Version
+        model: "gemini-1.5-flash-002", 
         contents: `3-question quiz for ${topic} at Band ${level} (JSON).`,
         config: {
           responseMimeType: "application/json",
@@ -218,4 +214,14 @@ export const gemini = new GeminiService();
 export async function decodeAudio(base64: string, ctx: AudioContext): Promise<AudioBuffer> {
   const binaryString = atob(base64);
   const bytes = new Uint8Array(binaryString.length);
-  for (let i = 0; i < binaryString.
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  const dataInt16 = new Int16Array(bytes.buffer);
+  const buffer = ctx.createBuffer(1, dataInt16.length, 24000);
+  const channelData = buffer.getChannelData(0);
+  for (let i = 0; i < dataInt16.length; i++) {
+    channelData[i] = dataInt16[i] / 32768.0;
+  }
+  return buffer;
+}
