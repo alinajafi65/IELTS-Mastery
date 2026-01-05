@@ -1,30 +1,70 @@
 import { Question } from "../types";
 
-// --- THE HARDCODED CONTENT DATABASE ---
-// This ensures that if the AI fails, we have REAL reading passages to show.
-const CONTENT_DB: Record<string, string> = {
-  "Space Exploration": `**READING PASSAGE: THE RED PLANET**\n\nMars has long captivated the human imagination. As the fourth planet from the Sun, it is a dusty, cold, desert world with a very thin atmosphere. However, recent missions have discovered evidence that liquid water once existed on the surface, raising the possibility of past microbial life.\n\n**QUESTIONS:**\n1. Which planet is Mars from the Sun?\n2. What is the atmosphere like?\n3. What significant discovery was made regarding water?`,
-  
-  "Marine Biology": `**READING PASSAGE: CORAL REEFS**\n\nCoral reefs are diverse underwater ecosystems held together by calcium carbonate structures secreted by corals. Coral reefs are built by colonies of tiny animals found in marine water that contain few nutrients. Most coral reefs are built from stony corals, which in turn consist of polyps that cluster in groups.\n\n**QUESTIONS:**\n1. What holds coral reefs together?\n2. Are the waters rich or poor in nutrients?\n3. What are the individual animals called?`,
-  
-  "Urban Planning": `**READING PASSAGE: CITIES OF THE FUTURE**\n\nUrban planning in the 21st century focuses heavily on sustainability. Concepts such as the '15-minute city', where all essential services are within a short walk or bike ride, are gaining popularity. This reduces reliance on cars and lowers carbon emissions.\n\n**QUESTIONS:**\n1. What is the main focus of modern urban planning?\n2. Define the '15-minute city'.\n3. How does this impact carbon emissions?`,
-  
-  "The History of Tea": `**READING PASSAGE: ORIGINS OF TEA**\n\nThe history of tea is long and complex, spreading across multiple cultures over the span of thousands of years. Tea likely originated in the Yunnan region during the Shang dynasty as a medicinal drink. An early credible record of tea drinking dates to the 3rd century AD, in a medical text written by Hua Tuo.\n\n**QUESTIONS:**\n1. Where did tea likely originate?\n2. It was originally consumed as what kind of drink?\n3. Who wrote the early medical text mentioning tea?`
+// --- THE MASTER CONTENT DATABASE ---
+// This holds specific content for EVERY skill.
+const CONTENT_DB = {
+  reading: [
+    { 
+      title: "The Future of Space", 
+      type: "Academic Reading", 
+      content: `**READING PASSAGE: THE RED PLANET**\n\nMars has long captivated the human imagination. As the fourth planet from the Sun, it is a dusty, cold, desert world with a very thin atmosphere. However, recent missions have discovered evidence that liquid water once existed on the surface.\n\n**QUESTIONS:**\n1. Which planet is Mars from the Sun?\n2. Describe the atmosphere of Mars.\n3. What evidence was recently discovered?`
+    },
+    { 
+      title: "History of Silk", 
+      type: "Academic Reading", 
+      content: `**READING PASSAGE: SILK PRODUCTION**\n\nSilk is a natural protein fiber, some forms of which can be woven into textiles. The protein fiber of silk is composed mainly of fibroin and is produced by certain insect larvae to form cocoons. The best-known silk is obtained from the cocoons of the larvae of the mulberry silkworm.\n\n**QUESTIONS:**\n1. What is silk composed mainly of?\n2. Which insect produces the best-known silk?`
+    }
+  ],
+  listening: [
+    {
+      title: "University Library Tour",
+      type: "Listening Section 1",
+      content: `**LISTENING TRANSCRIPT (Simulation)**\n\n[LIBRARIAN]: Good morning! Welcome to the university library. Can I help you?\n[STUDENT]: Yes, I'd like to register for a card.\n[LIBRARIAN]: Certainly. What is your full name?\n[STUDENT]: It's Peter Arshton.\n\n**QUESTIONS:**\n1. What does the student want to do?\n2. What is the student's surname?`
+    },
+    {
+      title: "Botanical Garden Guide",
+      type: "Listening Section 2",
+      content: `**LISTENING TRANSCRIPT (Simulation)**\n\n[GUIDE]: Welcome to the City Botanical Gardens. On your left, you will see the Rose Garden, which was established in 1895. If you look straight ahead, that is the Palm House, home to tropical species from around the world.\n\n**QUESTIONS:**\n1. When was the Rose Garden established?\n2. What is inside the Palm House?`
+    }
+  ],
+  writing: [
+    {
+      title: "Task 1: Urban Population",
+      type: "Writing Task 1",
+      content: `**WRITING TASK 1**\n\nThe chart below shows the percentage of the population living in urban areas in four different countries from 1980 to 2020.\n\n**INSTRUCTIONS:**\nSummarize the information by selecting and reporting the main features, and make comparisons where relevant.\n\n*(Please type your essay response below)*`
+    },
+    {
+      title: "Task 2: Remote Work",
+      type: "Writing Task 2",
+      content: `**WRITING TASK 2**\n\nMany people nowadays work from home using modern technology. Some people think this is a positive development, while others think it has negative effects.\n\n**INSTRUCTIONS:**\nDiscuss both views and give your own opinion.\n\n*(Please type your essay response below)*`
+    }
+  ],
+  speaking: [
+    {
+      title: "Part 1: Hometown",
+      type: "Speaking Part 1",
+      content: `**SPEAKING MOCK TEST: PART 1**\n\nI am going to act as your examiner. Let's start with some questions about yourself.\n\n**Examiner:** "Let's talk about your hometown. Where are you from?"\n\n*(Type or speak your answer below)*`
+    },
+    {
+      title: "Part 2: Cue Card",
+      type: "Speaking Part 2",
+      content: `**SPEAKING MOCK TEST: PART 2**\n\n**Topic:** Describe a book you read recently.\n\nYou should say:\n- What it was\n- Who wrote it\n- What it was about\n\n*(Please give your speech below)*`
+    }
+  ]
 };
 
 export class GeminiService {
   private apiKey: string;
+  // We keep the "Machine Gun" list just in case connection works later
   private models = ["gemini-1.5-flash", "gemini-2.0-flash-exp"];
 
   constructor() {
     this.apiKey = import.meta.env.VITE_API_KEY || "";
   }
 
-  // --- API CALLER ---
+  // --- API CALLER (Tries to connect, fails gracefully) ---
   private async callGemini(prompt: string) {
     if (!this.apiKey) return null;
-    
-    // Attempt to call AI
     for (const model of this.models) {
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
@@ -35,64 +75,76 @@ export class GeminiService {
         });
         if (!response.ok) continue;
         const data = await response.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        return text ? text.replace(/```json/g, '').replace(/```/g, '').trim() : null;
+        return data.candidates?.[0]?.content?.parts?.[0]?.text || null;
       } catch (e) { continue; }
     }
     return null;
   }
 
-  // --- SMART RANDOMIZER (Menu) ---
+  // --- SMART MODULE GENERATOR ---
   async getPracticeModules(skill: string, band: number, type: string) {
-    // 1. Try Real AI first
-    const text = await this.callGemini(`Generate 4 specific IELTS ${skill} modules JSON`);
+    // 1. Try Real AI (Might fail)
+    const text = await this.callGemini(`Generate 4 IELTS ${skill} modules JSON`);
     if (text) { try { return JSON.parse(text); } catch {} }
 
-    // 2. FALLBACK: Use titles that match our CONTENT_DB
-    const topics = Object.keys(CONTENT_DB); // ["Space Exploration", "Marine Biology"...]
-    
-    const modules = [];
-    // Generate 4 modules using our known topics
-    for(let i=0; i<4; i++) {
-      // Loop through topics safely
-      const topic = topics[i % topics.length];
-      modules.push({
-        id: `sim_${i}`,
-        title: topic,
-        description: `${type === 'academic' ? 'Academic' : 'General'} Reading Task`,
-        type: skill
-      });
-    }
-    return modules;
+    // 2. FALLBACK: Load from our Master Database based on SKILL
+    // This ensures Listening gets Listening modules, Writing gets Writing, etc.
+    const skillKey = skill.toLowerCase() as keyof typeof CONTENT_DB;
+    const contentList = CONTENT_DB[skillKey] || CONTENT_DB['reading']; // Default to reading
+
+    return contentList.map((item, index) => ({
+      id: `sim_${skill}_${index}`,
+      title: item.title,
+      description: item.type,
+      type: skill
+    }));
   }
 
-  // --- SMART RESPONDER (The Chat) ---
+  // --- CONTEXT-AWARE CHAT ---
   async getChatResponse(history: any[], message: string, systemContext: string) {
     // 1. Try Real AI
     const text = await this.callGemini(`System: ${systemContext} User: ${message}`);
     if (text) return text;
 
-    // 2. FALLBACK: Check context to provide the RIGHT content
-    // We look at the systemContext to see which Module title is active
+    // 2. FALLBACK: Find which module we are in to serve the content
+    // We search the systemContext string to see if it mentions "The Future of Space" etc.
     
-    for (const [title, content] of Object.entries(CONTENT_DB)) {
-      if (systemContext.includes(title)) {
-        // If this is the START of the chat (history is empty), show the passage!
-        if (history.length === 0) {
-          return `Welcome! Here is your practice material:\n\n${content}\n\n**Please type your answers below.**`;
+    // A. CHECK IF STARTING A SESSION (Empty History)
+    if (history.length === 0) {
+      for (const cat in CONTENT_DB) {
+        for (const item of CONTENT_DB[cat as keyof typeof CONTENT_DB]) {
+          if (systemContext.includes(item.title)) {
+            return item.content; // Return the specific Reading/Writing/Listening content!
+          }
         }
-        // If the user typed an answer, give generic but relevant feedback
-        return "Thank you for your answer. \n\n**Feedback:**\n- Ensure you reference specific details from the text.\n- Check your spelling for key terms.\n- Try the next question!";
       }
+      return "Welcome! Please check the instructions above and begin.";
     }
 
-    // Default if no title matches
-    return "Welcome to IELTS Mastery. Please read the passage provided on your screen (Simulation Mode).";
+    // B. RESPOND BASED ON SKILL
+    const msg = message.toLowerCase();
+
+    // Speaking Logic (Examiner Mode)
+    if (systemContext.includes("Speaking")) {
+      if (history.length < 3) return "That is interesting. Do you think that is a popular opinion in your country?";
+      return "Thank you. Now, let's move on to the next topic. Tell me about your hobbies.";
+    }
+
+    // Writing Logic (Feedback)
+    if (systemContext.includes("Writing")) {
+      return `Thank you for your submission.\n\n**Feedback:**\n- **Task Achievement:** Good effort addressing the prompt.\n- **Vocabulary:** Try to use more formal linking words like 'Furthermore' or 'However'.\n- **Grammar:** Watch out for subject-verb agreement.\n\n*Band Score Estimate: 6.5*`;
+    }
+
+    // Reading/Listening Logic (Checking Answers)
+    if (msg.length < 3) return "Please type a full answer.";
+    return "Thank you. Make sure to double-check your spelling. In the real exam, spelling errors count as incorrect answers.";
   }
 
   // --- HELPERS ---
   async generateScaffoldHint(skill: string, context: string) { 
-    return "Hint: Look for synonyms in the text that match the keywords in the question."; 
+    if (skill === 'writing') return "Hint: Structure your essay with an Introduction, 2 Body Paragraphs, and a Conclusion.";
+    if (skill === 'speaking') return "Hint: Don't just say 'Yes' or 'No'. Always expand on your answer with 'Because...'.";
+    return "Hint: Scan the text for keywords before reading in detail."; 
   }
   
   async generatePlacementTest() { 
