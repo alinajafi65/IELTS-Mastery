@@ -1,49 +1,106 @@
 import { Question } from "../types";
 
-// NOTE: This version uses NO Google AI tools. It creates a simulation.
-// It is impossible for this code to throw an "API Key Missing" error.
-
 export class GeminiService {
-  constructor() {} 
+  private apiKey: string;
+  
+  // We use 1.5-flash (Fast) and 1.0-pro (Stable)
+  private models = [
+    "gemini-1.5-flash",
+    "gemini-1.0-pro",
+    "gemini-pro"
+  ];
 
-  // 1. DATA SIMULATION (The "Fake" AI)
+  constructor() {
+    this.apiKey = import.meta.env.VITE_API_KEY || "";
+  }
+
+  private async callGemini(prompt: string) {
+    if (!this.apiKey) return null;
+
+    // FIX: We removed 'generationConfig' to stop the 400 Error.
+    // We just send the text simple and clean.
+    const body = {
+      contents: [{ parts: [{ text: prompt }] }]
+    };
+
+    for (const model of this.models) {
+      try {
+        // Try standard API version
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
+        
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+
+        // If this model fails, try the next one
+        if (!response.ok) continue;
+
+        const data = await response.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        
+        if (text) {
+          // Clean up the text (remove ```json markers)
+          return text.replace(/```json/g, '').replace(/```/g, '').trim();
+        }
+      } catch (e) { continue; }
+    }
+    return null;
+  }
+
+  // --- REAL FUNCTIONS ---
+
   async getPracticeModules(skill: string, band: number, type: string) {
-    // This data ALWAYS loads.
-    if (skill === 'reading') {
-      return [
-        { id: "read1", title: "The History of Silk", description: "Academic Reading Passage 1", type: "Reading" },
-        { id: "read2", title: "Urban Planning 2050", description: "Academic Reading Passage 2", type: "Reading" },
-        { id: "read3", title: "Global Water Crisis", description: "Academic Reading Passage 3", type: "Reading" }
-      ];
-    }
-    if (skill === 'writing') {
-      return [
-        { id: "w1", title: "Task 1: Chart Analysis", description: "Summarize the chart data", type: "Writing" },
-        { id: "w2", title: "Task 2: Global Warming", description: "Opinion Essay", type: "Writing" }
-      ];
-    }
-    // Default for other skills
-    return [
-      { id: "gen1", title: "General Practice 1", description: "Standard Module", type: "General" },
-      { id: "gen2", title: "General Practice 2", description: "Standard Module", type: "General" }
-    ];
+    // We explicitly ask for JSON in the text now
+    const prompt = `Generate 4 specific IELTS practice modules for ${skill} (${type} track) at Band ${band} level. 
+    Output ONLY a raw JSON array. Format: [{"id":"1","title":"...","description":"...","type":"..."}]`;
+    
+    const text = await this.callGemini(prompt);
+    
+    if (!text) return []; // If connection fails, show empty list (not fake data)
+    
+    try { 
+        // Find the start of the JSON array
+        const start = text.indexOf('[');
+        const end = text.lastIndexOf(']') + 1;
+        if (start === -1 || end === 0) return [];
+        return JSON.parse(text.substring(start, end)); 
+    } catch { return []; }
   }
 
   async getChatResponse(history: any[], message: string, systemContext: string) {
-    return "That is an excellent point! To score higher in IELTS, try expanding on this idea with a specific example. This demonstrates coherence and improves your band score.";
+    // Build the chat history for the AI
+    let fullPrompt = `System: ${systemContext}\n`;
+    history.forEach(h => fullPrompt += `${h.role}: ${h.text}\n`);
+    fullPrompt += `User: ${message}`;
+    
+    const text = await this.callGemini(fullPrompt);
+    
+    // If AI fails, give a clear error message so you know
+    return text || "Error: I cannot connect to Google. Please check your VPN or API Key.";
   }
 
-  // 2. EMPTY HELPERS (To prevent crashes)
-  async generateScaffoldHint() { return "Try using more complex vocabulary."; }
-  async generatePlacementTest() { return []; }
-  async getLevelAssessment() { return { level: "Intermediate", band: 6.0 }; }
+  // --- HELPERS ---
+  async generateScaffoldHint(skill: string, context: string) { 
+    return (await this.callGemini(`Hint for ${skill}: ${context}`)) || "Hint unavailable."; 
+  }
+  
+  async generatePlacementTest() { 
+    const text = await this.callGemini("Generate 10 IELTS placement questions as JSON array. Keys: id, text, options, correctAnswer.");
+    try { return JSON.parse(text || "[]"); } catch { return []; }
+  }
+
+  async getLevelAssessment(score: number, total: number) { 
+      return { level: "Assessment Pending", band: 0 }; 
+  }
+  
   async generateEndSessionQuiz() { return []; }
   async generateListeningAudio() { return null; }
   async generateWritingTaskImage() { return null; }
 }
 
 export const gemini = new GeminiService();
-
 export async function decodeAudio(base64: string, ctx: AudioContext) { 
   if (!ctx) return null;
   return ctx.createBuffer(1, 1, 22050); 
