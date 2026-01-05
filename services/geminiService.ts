@@ -3,12 +3,11 @@ import { Question } from "../types";
 export class GeminiService {
   private apiKey: string;
   
-  // WE ARE SWITCHING TO "OLD RELIABLE" MODELS
-  // These are less likely to 404 than the new "Flash" models.
+  // Trying the most stable models first
   private models = [
-    "gemini-1.0-pro",     // Most stable, widely available
-    "gemini-1.5-flash",   // Fast, but region-sensitive
-    "gemini-pro"          // The original model (backup)
+    "gemini-1.0-pro",     // Very stable, no JSON mode needed
+    "gemini-1.5-flash",
+    "gemini-pro"
   ];
 
   constructor() {
@@ -18,20 +17,13 @@ export class GeminiService {
   private async callGemini(prompt: string, schema?: any) {
     if (!this.apiKey) return null;
 
+    // BASIC BODY: No fancy "generationConfig" that breaks old models
     const body: any = {
       contents: [{ parts: [{ text: prompt }] }]
     };
 
-    if (schema) {
-      body.generationConfig = {
-        response_mime_type: "application/json",
-        response_schema: schema
-      };
-    }
-
     for (const model of this.models) {
       try {
-        // We try both v1beta and v1 endpoints to find the one that matches your key
         const versions = ["v1beta", "v1"];
         
         for (const version of versions) {
@@ -43,56 +35,52 @@ export class GeminiService {
             body: JSON.stringify(body)
           });
 
-          if (response.status === 404) continue; // Model not found, try next
-          if (response.status === 429) continue; // Rate limit, try next
+          // 404 = Model missing. 400 = Bad Config (Should be fixed now).
+          if (response.status === 404 || response.status === 400) continue;
+          if (response.status === 429) continue; 
           
-          if (!response.ok) {
-             const errorText = await response.text();
-             console.error(`Model ${model} (${version}) error:`, errorText);
-             continue;
-          }
+          if (!response.ok) continue;
 
-          // SUCCESS - REAL AI RESPONSE
+          // SUCCESS
           const data = await response.json();
           const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          console.log("Real AI Responded:", text); // Check console to verify it's real
-          return text ? text.replace(/```json/g, '').replace(/```/g, '').trim() : null;
+          
+          console.log(`Success with ${model}:`, text?.substring(0, 50));
+          
+          // CLEANUP: Extract JSON from the text manually
+          if (text) {
+            // Remove markdown ```json ... ``` wrappers
+            const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+            // Sometimes older models add extra text, find the first '[' or '{'
+            const firstBracket = cleanText.indexOf('[');
+            const firstBrace = cleanText.indexOf('{');
+            const start = (firstBracket !== -1 && (firstBrace === -1 || firstBracket < firstBrace)) 
+              ? firstBracket 
+              : firstBrace;
+            
+            return start !== -1 ? cleanText.substring(start) : cleanText;
+          }
+          return null;
         }
-      } catch (e) {
-        console.error(`Model ${model} failed connection.`, e);
-      }
+      } catch (e) { continue; }
     }
     return null;
   }
 
-  // --- REAL FUNCTIONALITY ONLY ---
+  // --- MAIN FUNCTIONS ---
 
   async getPracticeModules(skill: string, band: number, type: string) {
-    const prompt = `Generate 4 specific IELTS practice modules for ${skill} (${type} track) at Band ${band} level. Provide in JSON.`;
-    const schema = {
-      type: "ARRAY",
-      items: {
-        type: "OBJECT",
-        properties: {
-          id: { type: "STRING" },
-          title: { type: "STRING" },
-          description: { type: "STRING" },
-          type: { type: "STRING" }
-        },
-        required: ["id", "title", "description", "type"]
-      }
-    };
+    // Explicitly ask for JSON in the text prompt since we removed the config
+    const prompt = `Generate 4 specific IELTS practice modules for ${skill} (${type} track) at Band ${band} level. 
+    Output ONLY valid JSON array with keys: id, title, description, type. Do not add explanations.`;
     
-    const text = await this.callGemini(prompt, schema);
+    const text = await this.callGemini(prompt);
     
-    // We keep the "Simulation" for the MENU only, so the app isn't empty.
-    // But the CHAT (below) will be real.
     if (!text) {
+      // Keep fallback just in case network fails completely
       return [
-        { id: "read1", title: `The Future of ${type === 'academic' ? 'Astrophysics' : 'Remote Work'}`, description: "Matching Headings & True/False", type: `${type} Reading` },
-        { id: "read2", title: "History of the Silk Road", description: "Multiple Choice Questions", type: `${type} Reading` },
-        { id: "read3", title: "Micro-Plastics in Oceans", description: "Sentence Completion", type: `${type} Reading` },
-        { id: "read4", title: "Cognitive Development", description: "Yes/No/Not Given", type: `${type} Reading` }
+        { id: "read1", title: `The Future of ${type === 'academic' ? 'Astrophysics' : 'Remote Work'}`, description: "Matching Headings", type: `${type} Reading` },
+        { id: "read2", title: "History of the Silk Road", description: "Multiple Choice", type: `${type} Reading` }
       ];
     }
     try { return JSON.parse(text); } catch { return []; }
@@ -103,19 +91,20 @@ export class GeminiService {
     history.forEach(h => fullPrompt += `${h.role}: ${h.text}\n`);
     fullPrompt += `User: ${message}`;
     
-    // CALL THE REAL AI
     const text = await this.callGemini(fullPrompt);
-    
-    // NO FAKE RESPONSES. If AI fails, tell the truth.
-    if (!text) return "I am currently unable to connect to the AI server. Please check your internet connection or API Key.";
-    
+    if (!text) return "I am currently unable to connect to the AI server.";
     return text;
   }
 
-  // ... (Keep other helpers same as before)
-  private getModuleSchema() { return {}; } // (Simplified for brevity)
-  async generateScaffoldHint(skill: string, context: string, targetBand: number) { return "Hint unavailable."; }
-  async generatePlacementTest() { return []; }
+  // Helpers
+  private getModuleSchema() { return {}; }
+  async generateScaffoldHint(skill: string, context: string, targetBand: number) { 
+    return (await this.callGemini(`Hint for ${skill}: ${context}`)) || "Hint unavailable."; 
+  }
+  async generatePlacementTest() { 
+    const text = await this.callGemini("Generate 10 IELTS placement questions as JSON array. Keys: id, text, options, correctAnswer.");
+    try { return JSON.parse(text || "[]"); } catch { return []; }
+  }
   async getLevelAssessment(score: number, total: number) { return { level: "Unknown", band: 0 }; }
   async generateEndSessionQuiz(topic: string, level: number) { return []; }
   async generateListeningAudio(script: string) { return null; }
