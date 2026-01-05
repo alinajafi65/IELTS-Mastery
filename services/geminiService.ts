@@ -3,18 +3,29 @@ import { Question } from "../types";
 export class GeminiService {
   private apiKey: string;
   
-  // We will try the most standard model first
-  private models = ["gemini-1.5-flash", "gemini-pro"];
+  // PRIORITY LIST:
+  // 1. gemini-2.0-flash-exp (We KNOW this connects for you, just need to handle speed limits)
+  // 2. gemini-1.5-flash (Standard)
+  // 3. gemini-1.5-flash-8b (Smaller, often works when others don't)
+  // 4. gemini-1.0-pro (Old reliable)
+  private models = [
+    "gemini-2.0-flash-exp", 
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-8b",
+    "gemini-1.0-pro"
+  ];
 
   constructor() {
     this.apiKey = import.meta.env.VITE_API_KEY || "";
-    // Debug log to see if Key exists (Do not share this screenshot if possible)
-    console.log("API Key detected:", this.apiKey ? "YES (Length: " + this.apiKey.length + ")" : "NO");
+  }
+
+  private async wait(ms: number) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   private async callGemini(prompt: string) {
     if (!this.apiKey) {
-      console.error("No API Key found.");
+      console.error("No API Key.");
       return null;
     }
 
@@ -22,33 +33,56 @@ export class GeminiService {
       contents: [{ parts: [{ text: prompt }] }]
     };
 
+    // We will try EVERY model on EVERY version until one works
+    const versions = ["v1beta", "v1"];
+
     for (const model of this.models) {
-      try {
-        // FIX: Changed 'v1beta' to 'v1' (More stable for standard keys)
-        const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${this.apiKey}`;
+      for (const version of versions) {
         
-        const response = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body)
-        });
+        // Retry loop for Speed Limits (429)
+        let attempts = 0;
+        const maxAttempts = 2; // Try twice per model
 
-        if (response.status === 404) {
-          console.warn(`Model ${model} returned 404 (Not Found). Checking next...`);
-          continue;
+        while (attempts < maxAttempts) {
+          try {
+            const url = `https://generativelanguage.googleapis.com/${version}/models/${model}:generateContent?key=${this.apiKey}`;
+            
+            const response = await fetch(url, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body)
+            });
+
+            // 404 = Wrong Address/Model. Stop retrying this specific combo.
+            if (response.status === 404) {
+              console.warn(`[${model}][${version}] -> 404 Not Found. Skipping.`);
+              break; 
+            }
+
+            // 429 = Found it! But busy. WAIT and RETRY.
+            if (response.status === 429 || response.status === 503) {
+              console.warn(`[${model}] is busy (429). Waiting 5s...`);
+              await this.wait(5000); // Wait 5 seconds
+              attempts++;
+              continue;
+            }
+
+            if (!response.ok) {
+              console.error(`[${model}] Error ${response.status}`);
+              break;
+            }
+
+            // SUCCESS!
+            const data = await response.json();
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            console.log(`%c SUCCESS with ${model} (${version})`, "color: lime; font-weight:bold;");
+            
+            return text ? text.replace(/```json/g, '').replace(/```/g, '').trim() : null;
+
+          } catch (e) {
+            break;
+          }
         }
-
-        if (!response.ok) {
-          console.error(`API Error ${response.status}:`, await response.text());
-          continue;
-        }
-
-        const data = await response.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        
-        return text ? text.replace(/```json/g, '').replace(/```/g, '').trim() : null;
-      } catch (e) {
-        console.error("Connection error:", e);
       }
     }
     return null;
@@ -62,27 +96,21 @@ export class GeminiService {
     
     const text = await this.callGemini(prompt);
     
-    // ERROR HANDLING:
-    // If text is null (API failed), return a visible ERROR CARD instead of a white screen.
     if (!text) {
-      return [
-        { 
-          id: "error", 
-          title: "Connection Failed", 
-          description: "Google returned 404. Check API Key or VPN.", 
-          type: "System Error" 
-        }
-      ];
+      return [{ 
+        id: "error", 
+        title: "Connection Failed", 
+        description: "Google returned 404/429 on all models. Check API Key.", 
+        type: "Error" 
+      }];
     }
     
     try { 
         const start = text.indexOf('[');
         const end = text.lastIndexOf(']') + 1;
-        if (start === -1) throw new Error("No JSON found");
+        if (start === -1) return [];
         return JSON.parse(text.substring(start, end)); 
-    } catch (e) { 
-        return [{ id: "json-error", title: "Data Error", description: "AI response was invalid.", type: "Error" }]; 
-    }
+    } catch { return []; }
   }
 
   async getChatResponse(history: any[], message: string, systemContext: string) {
@@ -91,7 +119,7 @@ export class GeminiService {
     fullPrompt += `User: ${message}`;
     
     const text = await this.callGemini(fullPrompt);
-    return text || "Error: Unable to connect to Google API (404/Connection Failed).";
+    return text || "Error: Unable to connect to Google API.";
   }
 
   // --- HELPERS ---
